@@ -1,0 +1,32 @@
+version: "3.8"
+
+services:
+  sidecar:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.sidecar
+    volumes:
+      - muselet-sock:/var/run/muselet
+      - muselet-logs:/var/log/muselet
+    networks:
+      - muselet-net
+
+  # Example: attach to a botl-like container
+  workspace:
+    image: alpine:3.19
+    volumes:
+      - muselet-sock:/var/run/muselet:ro
+      - ./agent:/usr/local/bin/muselet-agent:ro
+    networks:
+      - muselet-net
+    entrypoint: ["muselet-agent", "--", "sh"]
+    depends_on:
+      - sidecar
+
+volumes:
+  muselet-sock:
+  muselet-logs:
+
+networks:
+  muselet-net:
+    driver: bridge

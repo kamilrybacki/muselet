@@ -1,0 +1,45 @@
+version: 1
+
+categories:
+  credentials:
+    enabled: true
+  infrastructure:
+    enabled: true
+  pii:
+    enabled: false
+  proprietary:
+    enabled: false
+
+vectors:
+  network:
+    enabled: true
+    allowed_hosts:
+      - "api.anthropic.com"
+      - "github.com"
+      - "registry.npmjs.org"
+      - "pypi.org"
+      - "proxy.golang.org"
+    block_dns_tunneling: true
+
+  filesystem:
+    enabled: true
+    watch_paths:
+      - "/workspace"
+      - "/tmp"
+    excludes:
+      - ".git/**"
+      - "node_modules/**"
+      - "vendor/**"
+
+  stdout:
+    enabled: true
+    mode: speculative
+    hold_timeout_ms: 5
+
+  patches:
+    enabled: true
+    scan_before_export: true
+
+interactive:
+  timeout_seconds: 30
+  on_timeout: block
