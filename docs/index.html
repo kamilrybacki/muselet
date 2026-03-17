@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>muselet - Data Loss Prevention for Containers</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ───── Navigation ───── -->
+<nav class="nav" id="nav">
+  <div class="nav-inner">
+    <a href="#hero" class="nav-logo">
+      <span class="nav-logo-icon">&#9678;</span> muselet
+    </a>
+    <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links" id="nav-links">
+      <li><a href="#install">Install</a></li>
+      <li><a href="#quickstart">Quick Start</a></li>
+      <li><a href="#architecture">Architecture</a></li>
+      <li><a href="#rules">Rules</a></li>
+      <li><a href="#vectors">Vectors</a></li>
+      <li><a href="#policy">Policy</a></li>
+      <li><a href="#audit">Audit</a></li>
+      <li><a href="https://github.com/kamilrybacki/muselet" class="nav-gh">GitHub</a></li>
+    </ul>
+  </div>
+</nav>
+
+<!-- ───── Hero ───── -->
+<header class="hero" id="hero">
+  <div class="hero-bg"></div>
+  <div class="container hero-content">
+    <p class="hero-badge">Open Source DLP</p>
+    <h1>Stop secrets from<br>escaping your containers.</h1>
+    <p class="hero-sub">
+      <strong>muselet</strong> is a lightweight Data Loss Prevention layer for containerized workloads.
+      It intercepts credentials, PII, and infrastructure details before they leave via stdout, network, filesystem, or patches.
+    </p>
+    <div class="hero-actions">
+      <a href="#install" class="btn btn-primary">Get Started</a>
+      <a href="#rules" class="btn btn-outline">See Detection Rules</a>
+    </div>
+    <div class="hero-stats">
+      <div class="stat"><span class="stat-num">16</span><span class="stat-label">Detection Rules</span></div>
+      <div class="stat"><span class="stat-num">4</span><span class="stat-label">Attack Vectors</span></div>
+      <div class="stat"><span class="stat-num">5</span><span class="stat-label">Enforcement Actions</span></div>
+      <div class="stat"><span class="stat-num">1</span><span class="stat-label">Dependency</span></div>
+    </div>
+  </div>
+</header>
+
+<!-- ───── Install ───── -->
+<section class="section" id="install">
+  <div class="container">
+    <span class="section-number">01</span>
+    <h2>Installation</h2>
+    <p class="section-lead">muselet compiles to two static binaries with a single dependency. Build from source or use Docker.</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3>From Source</h3>
+        <p>Requires Go 1.24+</p>
+        <pre><code><span class="c"># Clone the repository</span>
+git clone https://github.com/kamilrybacki/muselet.git
+cd muselet
+
+<span class="c"># Build both binaries</span>
+make build
+
+<span class="c"># Binaries are in bin/</span>
+ls bin/
+<span class="out">muselet-agent    muselet-sidecar</span></code></pre>
+      </div>
+      <div class="card">
+        <h3>Docker</h3>
+        <p>Multi-stage Alpine-based images</p>
+        <pre><code><span class="c"># Build Docker images</span>
+make docker-build
+
+<span class="c"># Or run with Docker Compose</span>
+docker-compose -f deploy/docker-compose.yaml up</code></pre>
+        <p class="card-note">Images are based on Alpine 3.19 with stripped binaries (~8 MB each).</p>
+      </div>
+    </div>
+
+    <div class="card card-wide">
+      <h3>Verify Installation</h3>
+      <pre><code>$ bin/muselet-sidecar -help
+Usage of muselet-sidecar:
+  -socket string   Unix socket path (default "/var/run/muselet/muselet.sock")
+  -policy string   Policy YAML file (default "/etc/muselet/policy.yaml")
+  -audit-log string  Audit log path (default "/var/log/muselet/audit.jsonl")</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ───── Quick Start ───── -->
+<section class="section section-alt" id="quickstart">
+  <div class="container">
+    <span class="section-number">02</span>
+    <h2>Quick Start</h2>
+    <p class="section-lead">Get muselet running in three steps. The sidecar enforces policy while the agent wraps your process.</p>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <h3>Start the sidecar</h3>
+          <p>The sidecar loads your policy, listens on a Unix socket, and writes audit logs.</p>
+          <pre><code>muselet-sidecar \
+  -socket /var/run/muselet/muselet.sock \
+  -policy policies/default.yaml \
+  -audit-log /var/log/muselet/audit.jsonl</code></pre>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <h3>Launch your process through the agent</h3>
+          <p>The agent wraps your command, intercepting stdout/stderr and monitoring filesystem writes.</p>
+          <pre><code>muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace \
+  -exclude ".git/**,node_modules/**" \
+  -- python train.py</code></pre>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <h3>Check the audit log</h3>
+          <p>Every match, verdict, and enforcement action is logged as structured NDJSON.</p>
+          <pre><code>$ tail -1 /var/log/muselet/audit.jsonl | jq .
+{
+  "timestamp": "2026-03-17T14:22:08Z",
+  "session_id": "a1b2c3d4",
+  "vector": "stdout",
+  "action": "block",
+  "rule_id": "aws-access-key",
+  "detail": "AWS Access Key ID",
+  "matched": "AKIA...Q7XA",
+  "confidence": 0.95
+}</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───── Architecture ───── -->
+<section class="section" id="architecture">
+  <div class="container">
+    <span class="section-number">03</span>
+    <h2>Architecture</h2>
+    <p class="section-lead">Two lightweight processes cooperate over a Unix socket.</p>
+
+    <div class="arch-diagram">
+      <div class="arch-box arch-agent">
+        <h4>Agent</h4>
+        <ul>
+          <li>Wraps target process</li>
+          <li>Captures stdout/stderr</li>
+          <li>Monitors filesystem</li>
+          <li>Proxies network requests</li>
+          <li>Hot-path scanning</li>
+        </ul>
+      </div>
+      <div class="arch-arrow">
+        <div class="arch-arrow-line"></div>
+        <div class="arch-arrow-labels">
+          <span>events &rarr;</span>
+          <span>&larr; verdicts</span>
+        </div>
+        <div class="arch-arrow-proto">Unix Socket &middot; NDJSON</div>
+      </div>
+      <div class="arch-box arch-sidecar">
+        <h4>Sidecar</h4>
+        <ul>
+          <li>Loads YAML policy</li>
+          <li>Runs scanner pipeline</li>
+          <li>Issues verdicts</li>
+          <li>Writes audit logs</li>
+          <li>Learning mode</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="grid-3">
+      <div class="feature-card">
+        <div class="feature-icon">&#9889;</div>
+        <h4>Streaming Hot Path</h4>
+        <p>Stdout scanning is synchronous with overlap buffers to catch secrets split across chunks.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128274;</div>
+        <h4>Zero CGO</h4>
+        <p>Filesystem watcher uses polling for full portability. No platform-specific bindings required.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon">&#128230;</div>
+        <h4>Single Dependency</h4>
+        <p>Only <code>gopkg.in/yaml.v3</code> for policy parsing. Minimal attack surface, fast builds.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───── Detection Rules ───── -->
+<section class="section section-alt" id="rules">
+  <div class="container">
+    <span class="section-number">04</span>
+    <h2>Detection Rules</h2>
+    <p class="section-lead">16 builtin rules across four categories. Extend with custom rules in your policy file.</p>
+
+    <div class="pipeline">
+      <div class="pipeline-step">
+        <div class="pipeline-icon">AC</div>
+        <h4>Aho-Corasick</h4>
+        <p>Fast literal prefix matching filters input (<code>AKIA</code>, <code>ghp_</code>, <code>sk-live-</code>&hellip;)</p>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-step">
+        <div class="pipeline-icon">BF</div>
+        <h4>Bloom Filter</h4>
+        <p>Probabilistic check skips known-safe domains instantly</p>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-step">
+        <div class="pipeline-icon">Rx</div>
+        <h4>Regex Rules</h4>
+        <p>Structured pattern matching with compiled regexes</p>
+      </div>
+      <div class="pipeline-arrow">&rarr;</div>
+      <div class="pipeline-step">
+        <div class="pipeline-icon">Ctx</div>
+        <h4>Context Analysis</h4>
+        <p>File path, vector type, and nearby markers adjust confidence</p>
+      </div>
+    </div>
+
+    <!-- Credentials -->
+    <h3 class="rules-category" id="rules-credentials">
+      <span class="category-badge badge-critical">Credentials</span>
+    </h3>
+    <div class="rules-table-wrap">
+      <table class="rules-table">
+        <thead>
+          <tr><th>Rule ID</th><th>Description</th><th>Pattern Example</th><th>Severity</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>aws-access-key</code></td>
+            <td>AWS Access Key ID</td>
+            <td><code>AKIA</code> + 16 alphanumeric chars</td>
+            <td><span class="sev sev-critical">critical</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+          <tr>
+            <td><code>aws-secret-key</code></td>
+            <td>AWS Secret Access Key</td>
+            <td><code>aws_secret_access_key = ...</code></td>
+            <td><span class="sev sev-critical">critical</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+          <tr>
+            <td><code>github-pat</code></td>
+            <td>GitHub Personal Access Token</td>
+            <td><code>ghp_</code> + 36 alphanumeric chars</td>
+            <td><span class="sev sev-critical">critical</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+          <tr>
+            <td><code>github-oauth</code></td>
+            <td>GitHub OAuth Token</td>
+            <td><code>gho_</code> + 36 alphanumeric chars</td>
+            <td><span class="sev sev-critical">critical</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+          <tr>
+            <td><code>github-app-token</code></td>
+            <td>GitHub App Token</td>
+            <td><code>ghu_</code> + 36 alphanumeric chars</td>
+            <td><span class="sev sev-high">high</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+          <tr>
+            <td><code>private-key</code></td>
+            <td>Private Key Header</td>
+            <td><code>-----BEGIN RSA PRIVATE KEY-----</code></td>
+            <td><span class="sev sev-critical">critical</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+          <tr>
+            <td><code>connection-string</code></td>
+            <td>Database Connection String</td>
+            <td><code>postgres://user:pass@host/db</code></td>
+            <td><span class="sev sev-high">high</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+          <tr>
+            <td><code>bearer-token</code></td>
+            <td>Authorization Bearer Token</td>
+            <td><code>Bearer eyJhbGci...</code></td>
+            <td><span class="sev sev-high">high</span></td>
+            <td><span class="act act-alert">alert</span></td>
+          </tr>
+          <tr>
+            <td><code>generic-api-key</code></td>
+            <td>Generic API Key Assignment</td>
+            <td><code>api_key = "sk_..."</code></td>
+            <td><span class="sev sev-medium">medium</span></td>
+            <td><span class="act act-alert">alert</span></td>
+          </tr>
+          <tr>
+            <td><code>slack-token</code></td>
+            <td>Slack Token</td>
+            <td><code>xoxb-...</code></td>
+            <td><span class="sev sev-high">high</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+          <tr>
+            <td><code>stripe-key</code></td>
+            <td>Stripe API Key</td>
+            <td><code>sk_live_...</code></td>
+            <td><span class="sev sev-high">high</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+          <tr>
+            <td><code>google-api-key</code></td>
+            <td>Google API Key</td>
+            <td><code>AIza...</code></td>
+            <td><span class="sev sev-high">high</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Infrastructure -->
+    <h3 class="rules-category" id="rules-infrastructure">
+      <span class="category-badge badge-medium">Infrastructure</span>
+    </h3>
+    <div class="rules-table-wrap">
+      <table class="rules-table">
+        <thead>
+          <tr><th>Rule ID</th><th>Description</th><th>Pattern Example</th><th>Severity</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>private-ip</code></td>
+            <td>Private IP Address</td>
+            <td><code>10.0.x.x</code>, <code>172.16.x.x</code>, <code>192.168.x.x</code></td>
+            <td><span class="sev sev-medium">medium</span></td>
+            <td><span class="act act-alert">alert</span></td>
+          </tr>
+          <tr>
+            <td><code>aws-arn</code></td>
+            <td>AWS Resource ARN</td>
+            <td><code>arn:aws:iam::123456789012:...</code></td>
+            <td><span class="sev sev-medium">medium</span></td>
+            <td><span class="act act-alert">alert</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- PII -->
+    <h3 class="rules-category" id="rules-pii">
+      <span class="category-badge badge-high">PII</span>
+    </h3>
+    <div class="rules-table-wrap">
+      <table class="rules-table">
+        <thead>
+          <tr><th>Rule ID</th><th>Description</th><th>Pattern Example</th><th>Severity</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>email-address</code></td>
+            <td>Email Address</td>
+            <td><code>user@example.com</code></td>
+            <td><span class="sev sev-low">low</span></td>
+            <td><span class="act act-alert">alert</span></td>
+          </tr>
+          <tr>
+            <td><code>ssn</code></td>
+            <td>US Social Security Number</td>
+            <td><code>123-45-6789</code></td>
+            <td><span class="sev sev-high">high</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+          <tr>
+            <td><code>credit-card</code></td>
+            <td>Credit Card Number</td>
+            <td><code>4111111111111111</code></td>
+            <td><span class="sev sev-high">high</span></td>
+            <td><span class="act act-block">block</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Entropy -->
+    <h3 class="rules-category">
+      <span class="category-badge badge-medium">Entropy Detection</span>
+    </h3>
+    <div class="card card-wide">
+      <p>In addition to pattern-based rules, muselet performs <strong>Shannon entropy analysis</strong> on all scanned content.
+      Strings with entropy &ge; 4.5 and length 20&ndash;128 bytes are flagged as likely secrets, even if they don't match any known pattern.</p>
+      <p>This catches custom tokens, randomly generated passwords, and proprietary key formats that slip past regex rules.</p>
+    </div>
+
+    <!-- Context Analysis -->
+    <h3 class="rules-category">
+      <span class="category-badge badge-ctx">Context Analysis</span>
+    </h3>
+    <div class="grid-3" style="margin-top: 1.5rem;">
+      <div class="card">
+        <h4>File Path Risk</h4>
+        <p><strong>High risk:</strong> <code>.env</code>, <code>credentials.json</code>, <code>secrets.yaml</code>, <code>id_rsa</code></p>
+        <p><strong>Low risk:</strong> test files, docs, <code>node_modules</code>, <code>vendor</code></p>
+      </div>
+      <div class="card">
+        <h4>Vector Risk</h4>
+        <p><strong>High risk:</strong> network, patch</p>
+        <p><strong>Medium risk:</strong> stdout/stderr</p>
+        <p><strong>Low risk:</strong> filesystem (depends on path)</p>
+      </div>
+      <div class="card">
+        <h4>Nearby Markers</h4>
+        <p>Words like <code>test</code>, <code>example</code>, <code>dummy</code>, <code>mock</code>, <code>fake</code> near a match lower confidence, reducing false positives.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───── Vectors ───── -->
+<section class="section" id="vectors">
+  <div class="container">
+    <span class="section-number">05</span>
+    <h2>Monitoring Vectors</h2>
+    <p class="section-lead">muselet watches four distinct paths through which sensitive data can escape a container.</p>
+
+    <div class="vector-grid">
+      <div class="vector-card">
+        <div class="vector-header">
+          <span class="vector-icon">&#9654;</span>
+          <h3>stdout / stderr</h3>
+        </div>
+        <p>The agent wraps the child process and captures all output. Scanning happens on the <strong>hot path</strong> &mdash; synchronously, with overlap buffers to detect secrets split across chunks.</p>
+        <div class="vector-actions">
+          <span class="act act-block">block</span>
+          <span class="act act-redact">redact</span>
+          <span class="act act-alert">alert</span>
+        </div>
+        <pre><code>vectors:
+  stdout:
+    enabled: true
+    mode: speculative   <span class="c"># speculative | synchronous | async</span>
+    hold_timeout_ms: 5</code></pre>
+      </div>
+
+      <div class="vector-card">
+        <div class="vector-header">
+          <span class="vector-icon">&#127760;</span>
+          <h3>Network</h3>
+        </div>
+        <p>An HTTP proxy inspects outbound requests. Host allowlist/blocklist controls which endpoints are reachable. Optional TLS inspection and DNS tunneling detection.</p>
+        <div class="vector-actions">
+          <span class="act act-block">block</span>
+          <span class="act act-alert">alert</span>
+          <span class="act act-allow">allow</span>
+        </div>
+        <pre><code>vectors:
+  network:
+    enabled: true
+    allowed_hosts:
+      - "api.anthropic.com"
+      - "github.com"
+    block_dns_tunneling: true</code></pre>
+      </div>
+
+      <div class="vector-card">
+        <div class="vector-header">
+          <span class="vector-icon">&#128193;</span>
+          <h3>Filesystem</h3>
+        </div>
+        <p>A polling-based watcher (no CGO needed) monitors configured paths for create and write operations. Sensitive files can be quarantined before they're read by other processes.</p>
+        <div class="vector-actions">
+          <span class="act act-block">block</span>
+          <span class="act act-alert">alert</span>
+          <span class="act act-allow">allow</span>
+        </div>
+        <pre><code>vectors:
+  filesystem:
+    enabled: true
+    watch_paths: ["/workspace", "/tmp"]
+    excludes:
+      - ".git/**"
+      - "node_modules/**"</code></pre>
+      </div>
+
+      <div class="vector-card">
+        <div class="vector-header">
+          <span class="vector-icon">&#128221;</span>
+          <h3>Patches</h3>
+        </div>
+        <p>Code diffs are scanned before export. Catches secrets accidentally added in commits or staged changes before they leave the container.</p>
+        <div class="vector-actions">
+          <span class="act act-block">block</span>
+          <span class="act act-alert">alert</span>
+        </div>
+        <pre><code>vectors:
+  patches:
+    enabled: true
+    scan_before_export: true</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───── Policy ───── -->
+<section class="section section-alt" id="policy">
+  <div class="container">
+    <span class="section-number">06</span>
+    <h2>Policy Configuration</h2>
+    <p class="section-lead">Policies are YAML files that give you fine-grained control over what gets scanned and how violations are handled.</p>
+
+    <div class="grid-2">
+      <div>
+        <h3>Full Policy Reference</h3>
+        <pre><code><span class="c"># Policy version (required)</span>
+version: 1
+
+<span class="c"># Enable/disable detection categories</span>
+categories:
+  credentials:    { enabled: true }
+  infrastructure: { enabled: true }
+  pii:            { enabled: false }
+  proprietary:    { enabled: false }
+
+<span class="c"># Configure monitoring vectors</span>
+vectors:
+  network:
+    enabled: true
+    allowed_hosts:
+      - "api.anthropic.com"
+      - "github.com"
+      - "registry.npmjs.org"
+      - "pypi.org"
+      - "proxy.golang.org"
+    block_dns_tunneling: true
+
+  filesystem:
+    enabled: true
+    watch_paths:
+      - "/workspace"
+      - "/tmp"
+    excludes:
+      - ".git/**"
+      - "node_modules/**"
+      - "vendor/**"
+
+  stdout:
+    enabled: true
+    mode: speculative
+    hold_timeout_ms: 5
+
+  patches:
+    enabled: true
+    scan_before_export: true
+
+<span class="c"># Interactive verdict settings</span>
+interactive:
+  timeout_seconds: 30
+  on_timeout: block</code></pre>
+      </div>
+      <div>
+        <h3>Custom Rules</h3>
+        <p>Extend builtin detection with your own regex rules:</p>
+        <pre><code><span class="c"># Add to your policy YAML</span>
+custom_rules:
+  - id: internal-service-token
+    description: "Internal Service Token"
+    pattern: 'svc_tok_[a-f0-9]{32}'
+    category: credentials
+    severity: high
+    action: block
+
+  - id: proprietary-model-id
+    description: "ML Model Identifier"
+    pattern: 'mdl-[a-z]{2}-\d{8}-[a-f0-9]{12}'
+    category: proprietary
+    severity: medium
+    action: alert</code></pre>
+
+        <h3 style="margin-top: 2rem;">Learning Mode</h3>
+        <p>Enable learning mode to see what <em>would</em> be blocked without actually enforcing. Useful for tuning policy in production.</p>
+        <pre><code><span class="c"># In your policy YAML</span>
+learning_mode: true
+
+<span class="c"># Audit log will include:</span>
+{
+  "action": "allow",
+  "would_action": "block",
+  "rule_id": "aws-access-key",
+  ...
+}</code></pre>
+        <p>When satisfied with the results, set <code>learning_mode: false</code> to begin enforcement.</p>
+
+        <h3 style="margin-top: 2rem;">Enforcement Actions</h3>
+        <div class="action-list">
+          <div class="action-item">
+            <span class="act act-allow">allow</span>
+            <span>Let the content through without interference</span>
+          </div>
+          <div class="action-item">
+            <span class="act act-alert">alert</span>
+            <span>Allow but log the event for review</span>
+          </div>
+          <div class="action-item">
+            <span class="act act-block">block</span>
+            <span>Prevent the content from leaving the container</span>
+          </div>
+          <div class="action-item">
+            <span class="act act-redact">redact</span>
+            <span>Replace matched content with a placeholder</span>
+          </div>
+          <div class="action-item">
+            <span class="act act-suppress">suppress</span>
+            <span>Silently drop the content</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───── Audit ───── -->
+<section class="section" id="audit">
+  <div class="container">
+    <span class="section-number">07</span>
+    <h2>Audit Logging</h2>
+    <p class="section-lead">Every match, verdict, and enforcement action is recorded as structured NDJSON for compliance and debugging.</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3>Log Entry</h3>
+        <p>Each entry includes timestamp, session, vector, action, rule, matched content (redacted), and confidence score.</p>
+        <pre><code>{
+  "timestamp": "2026-03-17T14:22:08Z",
+  "session_id": "a1b2c3d4",
+  "vector": "stdout",
+  "action": "block",
+  "rule_id": "aws-access-key",
+  "detail": "AWS Access Key ID",
+  "matched": "AKIA...Q7XA",
+  "confidence": 0.95
+}</code></pre>
+      </div>
+      <div class="card">
+        <h3>Session Summary</h3>
+        <p>At the end of each session, a summary aggregates all events by vector and rule.</p>
+        <pre><code>{
+  "total_events": 47,
+  "blocked": 3,
+  "alerted": 12,
+  "allowed": 32,
+  "would_block": 0,
+  "by_vector": {
+    "stdout": 28,
+    "filesystem": 11,
+    "network": 6,
+    "patch": 2
+  },
+  "by_rule": {
+    "aws-access-key": 2,
+    "generic-api-key": 8,
+    "private-ip": 5,
+    ...
+  }
+}</code></pre>
+      </div>
+    </div>
+    <div class="card card-wide" style="margin-top: 1.5rem;">
+      <h3>Secret Redaction in Logs</h3>
+      <p>Matched secrets are automatically redacted in audit logs. Only the prefix and suffix are shown, with <code>...</code> replacing the middle.
+      This ensures audit logs themselves don't become a leakage vector.</p>
+      <pre><code>"matched": "AKIA...Q7XA"          <span class="c"># AWS key: first 4 + last 4 chars</span>
+"matched": "ghp_...efgh"          <span class="c"># GitHub PAT: prefix + last 4 chars</span>
+"matched": "postgres://u...@host" <span class="c"># Connection string: redacted credentials</span></code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ───── Testing ───── -->
+<section class="section section-alt" id="testing">
+  <div class="container">
+    <span class="section-number">08</span>
+    <h2>Testing</h2>
+    <p class="section-lead">Comprehensive test suites ensure detection accuracy and system reliability.</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3>Test Commands</h3>
+        <pre><code><span class="c"># All tests</span>
+make test
+
+<span class="c"># Unit tests with race detection</span>
+make test-unit
+
+<span class="c"># Agent + sidecar integration</span>
+make test-integration
+
+<span class="c"># Performance &amp; reliability</span>
+make test-system
+
+<span class="c"># Full Docker-based end-to-end</span>
+make test-e2e
+
+<span class="c"># Scanner benchmarks</span>
+make test-bench</code></pre>
+      </div>
+      <div class="card">
+        <h3>CI Stages</h3>
+        <div class="ci-stages">
+          <div class="ci-stage">
+            <code>make ci-fast</code>
+            <span>Unit tests + benchmarks</span>
+            <span class="ci-time">&lt; 1 min</span>
+          </div>
+          <div class="ci-stage">
+            <code>make ci-full</code>
+            <span>Unit + integration + system</span>
+            <span class="ci-time">~3 min</span>
+          </div>
+          <div class="ci-stage">
+            <code>make ci-nightly</code>
+            <span>Everything including e2e</span>
+            <span class="ci-time">~8 min</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ───── Footer ───── -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <span class="nav-logo-icon">&#9678;</span> muselet
+        <p>Data Loss Prevention for containerized workloads.</p>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/kamilrybacki/muselet">GitHub</a>
+        <a href="https://github.com/kamilrybacki/muselet/issues">Issues</a>
+        <a href="https://github.com/kamilrybacki/muselet/blob/main/LICENSE">MIT License</a>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="script.js"></script>
+</body>
+</html>
