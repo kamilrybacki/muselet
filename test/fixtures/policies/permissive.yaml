@@ -1,0 +1,34 @@
+version: 1
+
+categories:
+  credentials:
+    enabled: true
+  infrastructure:
+    enabled: false
+  pii:
+    enabled: false
+  proprietary:
+    enabled: false
+
+vectors:
+  network:
+    enabled: true
+    allowed_hosts:
+      - "api.anthropic.com"
+      - "github.com"
+      - "*.npmjs.org"
+
+  filesystem:
+    enabled: false
+
+  stdout:
+    enabled: true
+    mode: async
+
+  patches:
+    enabled: true
+    scan_before_export: true
+
+interactive:
+  timeout_seconds: 60
+  on_timeout: allow

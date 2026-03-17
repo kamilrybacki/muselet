@@ -1,0 +1,39 @@
+version: 1
+
+categories:
+  credentials:
+    enabled: true
+  infrastructure:
+    enabled: true
+  pii:
+    enabled: true
+  proprietary:
+    enabled: true
+
+vectors:
+  network:
+    enabled: true
+    allowed_hosts:
+      - "api.anthropic.com"
+    block_dns_tunneling: true
+    inspect_tls: true
+
+  filesystem:
+    enabled: true
+    watch_paths:
+      - "/workspace"
+      - "/tmp"
+      - "/home"
+
+  stdout:
+    enabled: true
+    mode: synchronous
+    hold_timeout_ms: 50
+
+  patches:
+    enabled: true
+    scan_before_export: true
+
+interactive:
+  timeout_seconds: 15
+  on_timeout: block
