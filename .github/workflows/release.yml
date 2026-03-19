@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test before release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Run all tests
+        run: make test
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      matrix:
+        goos: [linux, darwin]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Build binaries
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          go build -ldflags="-s -w" -o dist/muselet-agent-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/agent
+          go build -ldflags="-s -w" -o dist/muselet-sidecar-${{ matrix.goos }}-${{ matrix.goarch }} ./cmd/sidecar
+          cd dist && tar czf muselet-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz muselet-*
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/muselet-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+          generate_release_notes: true
+
+  docker:
+    name: Publish Docker Images
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract tag
+        id: tag
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.agent
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository }}/muselet-agent:${{ steps.tag.outputs.version }}
+            ghcr.io/${{ github.repository }}/muselet-agent:latest
+
+      - name: Build and push sidecar image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.sidecar
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository }}/muselet-sidecar:${{ steps.tag.outputs.version }}
+            ghcr.io/${{ github.repository }}/muselet-sidecar:latest
+
+  go-proxy:
+    name: Publish Go Module
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Trigger Go module proxy cache
+        run: |
+          GOPROXY=https://proxy.golang.org GO111MODULE=on \
+            go list -m github.com/kamilrybacki/muselet@${GITHUB_REF#refs/tags/}
