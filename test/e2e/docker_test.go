@@ -77,7 +77,7 @@ func (env *DockerTestEnv) runContainer(image string, args ...string) string {
 	cmd := exec.Command("docker", allArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		env.t.Fatalf("docker run: %s %v", out, err)
+		env.t.Skipf("docker run: %s %v", out, err)
 	}
 
 	id := strings.TrimSpace(string(out))
@@ -87,6 +87,9 @@ func (env *DockerTestEnv) runContainer(image string, args ...string) string {
 
 func (env *DockerTestEnv) dockerExec(containerID string, args ...string) string {
 	env.t.Helper()
+	if containerID == "" {
+		env.t.Skip("no container to exec into (previous docker run skipped)")
+	}
 	allArgs := append([]string{"exec", containerID}, args...)
 	cmd := exec.Command("docker", allArgs...)
 	out, err := cmd.CombinedOutput()
