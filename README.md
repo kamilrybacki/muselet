@@ -76,6 +76,97 @@ muselet-agent \
   -- python script.py
 ```
 
+## Usage Examples
+
+### curl — catching leaked tokens in verbose output
+
+```bash
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace \
+  -- curl -v -H "Authorization: Bearer $API_TOKEN" https://api.example.com/data
+
+# muselet redacts the Bearer token from stderr (-v output)
+```
+
+### Python — catching secrets in print/logging output
+
+```bash
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace \
+  -exclude ".git/**,__pycache__/**,.venv/**" \
+  -- python train.py --config config.yaml
+
+# Catches: print(os.environ), logging.debug(f"DSN={dsn}"), tracebacks with boto3 creds
+```
+
+### Node.js — catching secrets in console.log
+
+```bash
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace \
+  -exclude "node_modules/**,.git/**" \
+  -- node server.js
+
+# Catches: console.log(process.env), config objects with DB URIs, Stripe keys
+```
+
+### git — scanning patches before push
+
+```bash
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace \
+  -- git push origin main
+
+# Catches: .env files committed by mistake, hardcoded tokens, private keys in diffs
+```
+
+### Terraform — catching infrastructure secrets in plan/apply output
+
+```bash
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace/infra \
+  -exclude ".terraform/**" \
+  -- terraform apply -auto-approve
+
+# Catches: DB passwords in outputs, ARNs/account IDs, private IPs, tfstate secrets
+```
+
+### Database clients — catching PII and connection strings
+
+```bash
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -- psql "postgres://admin:s3cret@10.0.1.5:5432/prod"
+
+# Catches: connection string credentials, SSNs/emails in query results, internal IPs
+```
+
+### AWS CLI — catching credential and infrastructure leaks
+
+```bash
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -- aws sts get-caller-identity
+
+# Catches: ARNs, account IDs, access key display, signed URLs, private IPs
+```
+
+### Docker — catching secrets in build output
+
+```bash
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace \
+  -- docker build --build-arg API_KEY=$API_KEY -t myapp .
+
+# Catches: build args echoed in RUN steps, env vars in docker inspect/logs
+```
+
 ## Policy
 
 Policies are YAML files that control what gets scanned and how violations are handled:

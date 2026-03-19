@@ -23,6 +23,7 @@
     <ul class="nav-links" id="nav-links">
       <li><a href="#install">Install</a></li>
       <li><a href="#quickstart">Quick Start</a></li>
+      <li><a href="#examples">Examples</a></li>
       <li><a href="#architecture">Architecture</a></li>
       <li><a href="#rules">Rules</a></li>
       <li><a href="#vectors">Vectors</a></li>
@@ -154,10 +155,256 @@ Usage of muselet-sidecar:
   </div>
 </section>
 
-<!-- ───── Architecture ───── -->
-<section class="section" id="architecture">
+<!-- ───── Usage Examples ───── -->
+<section class="section" id="examples">
   <div class="container">
     <span class="section-number">03</span>
+    <h2>Usage Examples</h2>
+    <p class="section-lead">Real-world scenarios where muselet prevents common programs from leaking secrets.</p>
+
+    <!-- curl / wget -->
+    <h3 class="rules-category">
+      <span class="category-badge badge-critical">curl / wget</span>
+    </h3>
+    <div class="card card-wide">
+      <p><code>curl</code> and <code>wget</code> can leak API keys in headers, URLs, or POST bodies &mdash; especially when debug output is enabled.</p>
+      <pre><code><span class="c"># Wrap curl so muselet catches leaked tokens in verbose output</span>
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace \
+  -- curl -v -H "Authorization: Bearer $API_TOKEN" https://api.example.com/data
+
+<span class="c"># muselet blocks the Bearer token from appearing in stderr (-v output)</span>
+<span class="c"># Audit log:</span>
+<span class="c"># {"vector":"stdout","action":"redact","rule_id":"bearer-token","matched":"Bearer eyJh...xYzQ"}</span></code></pre>
+      <h4>Policy: allow only known API hosts</h4>
+      <pre><code>vectors:
+  network:
+    enabled: true
+    allowed_hosts:
+      - "api.example.com"
+      - "registry.npmjs.org"
+  stdout:
+    enabled: true
+    mode: synchronous</code></pre>
+    </div>
+
+    <!-- Python -->
+    <h3 class="rules-category">
+      <span class="category-badge badge-critical">Python</span>
+    </h3>
+    <div class="card card-wide">
+      <p>Python scripts commonly leak secrets via <code>print()</code> debugging, logging misconfigurations, or uncaught exceptions that dump environment variables.</p>
+      <pre><code><span class="c"># Wrap a Python ML training script that loads credentials from env</span>
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace \
+  -exclude ".git/**,__pycache__/**,.venv/**" \
+  -- python train.py --config config.yaml
+
+<span class="c"># Common leaks muselet catches:</span>
+<span class="c">#   print(os.environ)                     → blocks AWS keys, DB passwords</span>
+<span class="c">#   logging.debug(f"Connecting to {dsn}")  → blocks connection strings</span>
+<span class="c">#   traceback with boto3 credentials       → blocks AKIA... keys</span>
+<span class="c">#   pickle/joblib writing model with embedded tokens → filesystem block</span></code></pre>
+      <h4>Policy: scan stdout + filesystem writes</h4>
+      <pre><code>categories:
+  credentials:    { enabled: true }
+  infrastructure: { enabled: true }
+
+vectors:
+  stdout:
+    enabled: true
+    mode: speculative
+    hold_timeout_ms: 5
+  filesystem:
+    enabled: true
+    watch_paths: ["/workspace/output", "/tmp"]
+    excludes: ["__pycache__/**", ".venv/**"]</code></pre>
+    </div>
+
+    <!-- Node.js -->
+    <h3 class="rules-category">
+      <span class="category-badge badge-high">Node.js</span>
+    </h3>
+    <div class="card card-wide">
+      <p><code>console.log</code> in Node.js often dumps objects containing database URIs, API keys, or <code>.env</code> values during development.</p>
+      <pre><code><span class="c"># Wrap a Node.js server that might leak secrets via console.log</span>
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace \
+  -exclude "node_modules/**,.git/**" \
+  -- node server.js
+
+<span class="c"># Common leaks muselet catches:</span>
+<span class="c">#   console.log(process.env)             → blocks all env secrets</span>
+<span class="c">#   console.log(config)                  → blocks DB URIs, Stripe keys</span>
+<span class="c">#   npm install output with registry tokens</span>
+<span class="c">#   Error stacks exposing connection strings</span></code></pre>
+      <h4>Policy: strict mode for CI/CD pipelines</h4>
+      <pre><code>categories:
+  credentials:    { enabled: true }
+  pii:            { enabled: true }
+
+vectors:
+  stdout:
+    enabled: true
+    mode: synchronous        <span class="c"># block before output reaches terminal</span>
+  network:
+    enabled: true
+    allowed_hosts:
+      - "registry.npmjs.org"
+      - "github.com"</code></pre>
+    </div>
+
+    <!-- git -->
+    <h3 class="rules-category">
+      <span class="category-badge badge-critical">git</span>
+    </h3>
+    <div class="card card-wide">
+      <p><code>git diff</code>, <code>git log</code>, and commit operations can expose secrets added to tracked files. The patch vector catches secrets before they leave the container.</p>
+      <pre><code><span class="c"># Wrap git so muselet scans patches before push</span>
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace \
+  -- git push origin main
+
+<span class="c"># muselet scans the diff and blocks if secrets are found:</span>
+<span class="c">#   .env files committed by mistake        → blocks AWS_SECRET_ACCESS_KEY</span>
+<span class="c">#   Hardcoded tokens in source code         → blocks ghp_, sk_live_, xoxb-</span>
+<span class="c">#   Private keys added to the repo          → blocks -----BEGIN RSA PRIVATE KEY-----</span>
+<span class="c">#   git diff output leaking credentials     → stdout block</span></code></pre>
+      <h4>Policy: scan patches before export</h4>
+      <pre><code>vectors:
+  patches:
+    enabled: true
+    scan_before_export: true
+  stdout:
+    enabled: true
+    mode: synchronous</code></pre>
+    </div>
+
+    <!-- Terraform / IaC -->
+    <h3 class="rules-category">
+      <span class="category-badge badge-high">Terraform / IaC</span>
+    </h3>
+    <div class="card card-wide">
+      <p>Terraform outputs, plan files, and state dumps frequently contain cloud credentials, ARNs, and private IPs.</p>
+      <pre><code><span class="c"># Wrap terraform plan/apply to catch leaked infrastructure details</span>
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace/infra \
+  -exclude ".terraform/**" \
+  -- terraform apply -auto-approve
+
+<span class="c"># Common leaks muselet catches:</span>
+<span class="c">#   terraform output with DB passwords      → blocks connection strings</span>
+<span class="c">#   terraform plan showing ARNs/account IDs → alerts on aws-arn</span>
+<span class="c">#   terraform.tfstate with secrets           → filesystem block</span>
+<span class="c">#   Private subnet IPs in plan output        → alerts on private-ip</span></code></pre>
+      <h4>Policy: full infrastructure protection</h4>
+      <pre><code>categories:
+  credentials:    { enabled: true }
+  infrastructure: { enabled: true }
+
+vectors:
+  stdout:
+    enabled: true
+    mode: synchronous
+  filesystem:
+    enabled: true
+    watch_paths: ["/workspace/infra"]
+    excludes: [".terraform/**"]</code></pre>
+    </div>
+
+    <!-- PostgreSQL / MySQL CLI -->
+    <h3 class="rules-category">
+      <span class="category-badge badge-high">Database Clients</span>
+    </h3>
+    <div class="card card-wide">
+      <p>CLI database clients like <code>psql</code>, <code>mysql</code>, and <code>mongosh</code> can leak connection strings, query results with PII, and credentials in error messages.</p>
+      <pre><code><span class="c"># Wrap psql to prevent leaking connection details and query results</span>
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -- psql "postgres://admin:s3cret@10.0.1.5:5432/prod"
+
+<span class="c"># Common leaks muselet catches:</span>
+<span class="c">#   Connection string in process args        → blocks postgres://...@host</span>
+<span class="c">#   SELECT queries returning SSNs, emails    → blocks PII in stdout</span>
+<span class="c">#   Error messages exposing internal IPs     → alerts on private-ip</span>
+<span class="c">#   pg_dump output with sensitive data        → filesystem block</span></code></pre>
+      <h4>Policy: enable PII detection for DB workloads</h4>
+      <pre><code>categories:
+  credentials:    { enabled: true }
+  infrastructure: { enabled: true }
+  pii:            { enabled: true }    <span class="c"># catch SSNs, emails, credit cards</span>
+
+vectors:
+  stdout:
+    enabled: true
+    mode: synchronous
+  network:
+    enabled: true
+    allowed_hosts:
+      - "10.0.1.5"             <span class="c"># only allow the known DB host</span></code></pre>
+    </div>
+
+    <!-- AWS CLI -->
+    <h3 class="rules-category">
+      <span class="category-badge badge-critical">AWS CLI</span>
+    </h3>
+    <div class="card card-wide">
+      <p>The AWS CLI can output access keys, account IDs, ARNs, and resource details that reveal infrastructure topology.</p>
+      <pre><code><span class="c"># Wrap AWS CLI operations</span>
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -- aws sts get-caller-identity
+
+<span class="c"># Common leaks muselet catches:</span>
+<span class="c">#   aws sts get-caller-identity  → alerts on ARNs and account IDs</span>
+<span class="c">#   aws configure list           → blocks access key display</span>
+<span class="c">#   aws s3 presign               → blocks signed URLs with credentials</span>
+<span class="c">#   aws ec2 describe-instances   → alerts on private IPs</span></code></pre>
+      <h4>Policy: lock down AWS CLI output</h4>
+      <pre><code>categories:
+  credentials:    { enabled: true }
+  infrastructure: { enabled: true }
+
+vectors:
+  stdout:
+    enabled: true
+    mode: synchronous
+  network:
+    enabled: true
+    allowed_hosts:
+      - "*.amazonaws.com"</code></pre>
+    </div>
+
+    <!-- Docker -->
+    <h3 class="rules-category">
+      <span class="category-badge badge-high">Docker</span>
+    </h3>
+    <div class="card card-wide">
+      <p>Docker builds and runs can leak secrets via build args, environment variables in logs, and layer inspection.</p>
+      <pre><code><span class="c"># Wrap docker build to catch secrets in build output</span>
+muselet-agent \
+  -socket /var/run/muselet/muselet.sock \
+  -watch /workspace \
+  -- docker build --build-arg API_KEY=$API_KEY -t myapp .
+
+<span class="c"># Common leaks muselet catches:</span>
+<span class="c">#   Build args echoed in RUN steps          → blocks API keys in stdout</span>
+<span class="c">#   docker inspect showing env vars         → blocks credentials</span>
+<span class="c">#   docker logs with application secrets    → blocks tokens, passwords</span>
+<span class="c">#   Dockerfile COPY of .env files            → filesystem alert</span></code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ───── Architecture ───── -->
+<section class="section section-alt" id="architecture">
+  <div class="container">
+    <span class="section-number">04</span>
     <h2>Architecture</h2>
     <p class="section-lead">Two lightweight processes cooperate over a Unix socket.</p>
 
@@ -213,9 +460,9 @@ Usage of muselet-sidecar:
 </section>
 
 <!-- ───── Detection Rules ───── -->
-<section class="section section-alt" id="rules">
+<section class="section" id="rules">
   <div class="container">
-    <span class="section-number">04</span>
+    <span class="section-number">05</span>
     <h2>Detection Rules</h2>
     <p class="section-lead">16 builtin rules across four categories. Extend with custom rules in your policy file.</p>
 
@@ -441,9 +688,9 @@ Usage of muselet-sidecar:
 </section>
 
 <!-- ───── Vectors ───── -->
-<section class="section" id="vectors">
+<section class="section section-alt" id="vectors">
   <div class="container">
-    <span class="section-number">05</span>
+    <span class="section-number">06</span>
     <h2>Monitoring Vectors</h2>
     <p class="section-lead">muselet watches four distinct paths through which sensitive data can escape a container.</p>
 
@@ -526,9 +773,9 @@ Usage of muselet-sidecar:
 </section>
 
 <!-- ───── Policy ───── -->
-<section class="section section-alt" id="policy">
+<section class="section" id="policy">
   <div class="container">
-    <span class="section-number">06</span>
+    <span class="section-number">07</span>
     <h2>Policy Configuration</h2>
     <p class="section-lead">Policies are YAML files that give you fine-grained control over what gets scanned and how violations are handled.</p>
 
@@ -643,9 +890,9 @@ learning_mode: true
 </section>
 
 <!-- ───── Audit ───── -->
-<section class="section" id="audit">
+<section class="section section-alt" id="audit">
   <div class="container">
-    <span class="section-number">07</span>
+    <span class="section-number">08</span>
     <h2>Audit Logging</h2>
     <p class="section-lead">Every match, verdict, and enforcement action is recorded as structured NDJSON for compliance and debugging.</p>
 
@@ -700,9 +947,9 @@ learning_mode: true
 </section>
 
 <!-- ───── Testing ───── -->
-<section class="section section-alt" id="testing">
+<section class="section" id="testing">
   <div class="container">
-    <span class="section-number">08</span>
+    <span class="section-number">09</span>
     <h2>Testing</h2>
     <p class="section-lead">Comprehensive test suites ensure detection accuracy and system reliability.</p>
 
